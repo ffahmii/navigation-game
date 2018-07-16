@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Navigation Game</title>
+    <meta name="viewport" content="initial-scale=1.0">
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.2/css/bootstrap.min.css"
+          integrity="sha384-Smlep5jCw/wG7hdkwQ/Z5nLIefveQRIY9nfy6xoR1uRYBtpZgI6339F5dgvm/e9B" crossorigin="anonymous">
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: Roboto;
+        }
+
+        .card {
+            margin: 10px 10px 0 0;
+            border-radius: 2px 0 0 2px;
+            box-sizing: border-box;
+            -moz-box-sizing: border-box;
+            outline: none;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+            background-color: #fff;
+        }
+
+        #title {
+            color: #fff;
+            background-color: #4d90fe;
+            font-size: 25px;
+            font-weight: 500;
+            padding: 6px 12px;
+        }
+
+        .btn-primary {
+            background-color: #4d90fe;
+        }
+
+    </style>
+    <script type="text/javascript"
+            src="https://maps.googleapis.com/maps/api/js?sensor=false&key=AIzaSyBzRvHQoE265Wfz6gRRrzfpfKxBuj6_dcg"></script>
+    <script type="text/javascript" src="epolyv3.js"></script>
+</head>
+<body>
+<div class="container">
+    <p class="h1">Navigation Game</p>
+    <div class="row">
+        <div class="col-md-12">
+            <div id="map" style="height: 360px"></div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card">
+                <div>
+                    <div id="title">Actions</div>
+                </div>
+                <div class="mt-3 mx-3">
+                    <label>Start Point</label>
+                    <div class="input-group input-group-sm pb-3">
+                        <input type="text" id="input-start" class="form-control" placeholder="Enter starting point"
+                               value="-6.218274,106.802626">
+                    </div>
+                </div>
+                <div class="mx-3">
+                    <label>Destination</label>
+                    <div class="input-group input-group-sm pb-3">
+                        <input type="text" id="input-destination" class="form-control" placeholder="Enter destination"
+                               value="-6.1285924,106.6531396">
+                    </div>
+                </div>
+                <div class="mb-3 mx-3">
+                    <div class="input-group input-group-sm pb-3">
+                        <button type="button" id="btn-select-route" class="btn btn-primary btn-sm">Select Route</button>
+                        &nbsp;
+                        <button type="button" id="btn-start-driving" class="btn btn-primary btn-sm">Start Driving
+                        </button> &nbsp;
+                        <button type="button" id="btn-send-obstacle" class="btn btn-primary btn-sm">Send Obstacle
+                        </button> &nbsp;
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    var start = '';
+    var destination = '';
+    var map = null;
+    var directionsService;
+    var polylines = [];
+    var possibleCoordinates = [];
+    var obstacleCoordinates = [];
+    var step = 5;
+    var tick = 15;
+    var distance = 0;
+    var marker = null;
+    var polyline = null;
+    var tmpPolyline = null;
+    var startLatLng = null;
+    var destinationLatLng = null;
+    var timerHandle = null;
+
+    function initMap() {
+        start = document.getElementById('input-start').value;
+        destination = document.getElementById('input-destination').value;
+        map = new google.maps.Map(document.getElementById('map'), {
+            center: {lat: -6.218274, lng: 106.802626},
+            zoom: 12
+        });
+        google.maps.event.addDomListener(document.getElementById('btn-select-route'), 'click', function (e) {
+            calculateRoute(
+                start,
+                destination
+            );
+            e.preventDefault();
+            return false;
+        });
+        google.maps.event.addDomListener(document.getElementById('btn-start-driving'), 'click', function (e) {
+            if (possibleCoordinates.length === 0) {
+                alert('Please select route first!');
+                return false;
+            } else {
+                startAnimation();
+                e.preventDefault();
+                return false;
+            }
+        });
+        google.maps.event.addDomListener(document.getElementById('btn-send-obstacle'), 'click', function (e) {
+            if (possibleCoordinates.length === 0) {
+                alert('Please select route first!');
+                return false;
+            } else {
+                sendObstacle();
+                e.preventDefault();
+                return false;
+            }
+        });
+        directionsService = new google.maps.DirectionsService();
+        google.maps.Polyline.prototype.getBounds = function (startBounds) {
+            var bounds = startBounds ? startBounds : new google.maps.LatLngBounds();
+            this.getPath().forEach(function (item, index) {
+                bounds.extend(new google.maps.LatLng(item.lat(), item.lng()));
+            });
+            return bounds;
+        };
+        tmpPolyline = new google.maps.Polyline({
+            path: [],
+            strokeColor: '#FF0000',
+            strokeWeight: 3
+        });
+    }
+
+    function calculateRoute(start, end) {
+        if (marker) {
+            marker.setMap(null);
+        }
+        if (timerHandle) {
+            clearTimeout(timerHandle);
+        }
+        var request = {
+            origin: start,
+            destination: end,
+            provideRouteAlternatives: true,
+            unitSystem: google.maps.UnitSystem.METRIC,
+            travelMode: google.maps.TravelMode['DRIVING']
+        };
+        startLatLng = new google.maps.LatLng(start.split(',')[0], start.split(',')[1]);
+        destinationLatLng = new google.maps.LatLng(end.split(',')[0], end.split(',')[1]);
+        marker = new google.maps.Marker({
+            position: startLatLng,
+            map: map,
+            icon: {
+                url: "car.png",
+                scaledSize: new google.maps.Size(23, 23)
+            }
+        });
+        directionsService.route(request, function (response, status) {
+            for (var j in  polylines) {
+                polylines[j].setMap(null);
+            }
+            polylines = [];
+            if (status == google.maps.DirectionsStatus.OK) {
+                var bounds = new google.maps.LatLngBounds();
+                console.log(response.routes.length);
+                for (var i = response.routes.length - 1; i >= 0; i--) {
+                    if (possibleCoordinates.length === 0) savePossibleCoordinates(response.routes[i].overview_path);
+                    var line = drawPolyline(response.routes[i].overview_path, '#0000FF');
+                    if (!checkIfLocationIsOnEdge(line)) {
+                        line.setMap(map);
+                        polylines.push(line);
+                    }
+                    bounds = line.getBounds(bounds);
+                }
+                polyline = polylines[polylines.length - 1];
+                map.fitBounds(bounds);
+            }
+        });
+    }
+
+    function sendObstacle() {
+        var randomIndex = Math.floor(Math.random() * possibleCoordinates.length - 1);
+        var coordinate = possibleCoordinates[randomIndex];
+        obstacleCoordinates.push(coordinate);
+        var obstacle = new google.maps.Marker({
+            position: new google.maps.LatLng(coordinate.lat, coordinate.lng),
+            map: map,
+            icon: {
+                url: "stop.png",
+                scaledSize: new google.maps.Size(23, 23)
+            }
+        });
+        obstacle.setMap(map);
+        calculateRoute(marker.getPosition().lat() + ',' + marker.getPosition().lng(), destination);
+    }
+
+    function checkIfLocationIsOnEdge(line) {
+        for (var k in obstacleCoordinates) {
+            console.log(obstacleCoordinates[k].lat, obstacleCoordinates[k].lng);
+            var block = new google.maps.LatLng(obstacleCoordinates[k].lat, obstacleCoordinates[k].lng);
+            var isOnEdge = google.maps.geometry.poly.isLocationOnEdge(block, line, 10e-3);
+            if (isOnEdge) return true;
+        }
+        return false;
+    }
+
+    function savePossibleCoordinates(paths) {
+        for (var j in paths) {
+            var coordinate = new Object();
+            coordinate.lat = paths[j].latRadians() * 57.2958;
+            coordinate.lng = paths[j].lngRadians() * 57.2958;
+            possibleCoordinates.push(coordinate);
+        }
+    }
+
+    function drawPolyline(path, color) {
+        var line = new google.maps.Polyline({
+            path: path,
+            strokeColor: color,
+            strokeOpacity: 0.7,
+            strokeWeight: 3
+        });
+        return line;
+    }
+
+    function animate(d) {
+        if (d > distance) {
+            map.panTo(destinationLatLng);
+            marker.setPosition(destinationLatLng);
+            return;
+        }
+        var p = polyline.GetPointAtDistance(d);
+        map.panTo(p);
+        marker.setPosition(p);
+        timerHandle = setTimeout("animate(" + (d + step) + ")", tick);
+    }
+
+    function startAnimation() {
+        if (polyline !== undefined) {
+            distance = polyline.Distance();
+            map.setCenter(polyline.getPath().getAt(0));
+            tmpPolyline = new google.maps.Polyline({
+                path: [polyline.getPath().getAt(0)],
+                strokeColor: "#0000FF",
+                strokeWeight: 10
+            });
+            setTimeout("animate(200)", 2000);  // Allow time for the initial map display
+        } else {
+            alert('No routes available');
+        }
+    }
+
+    google.maps.event.addDomListener(window, 'load', initMap);
+</script>
+</body>
+</html>
